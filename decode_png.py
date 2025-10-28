@@ -90,7 +90,7 @@ class ImageExtractor:
                 if ack != "ACK":
                     break
                 self.client_socket.sendall(data)
-
+                    
     def run(self):
         """
         Executes the full flow: receive, extract, send back hidden images.

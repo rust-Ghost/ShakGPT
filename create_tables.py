@@ -3,44 +3,74 @@ from db_manager import DatabaseManager
 def create_all_tables(db_manager):
     """
     Create all necessary tables for the application using DatabaseManager instance.
-    
-    Args:
-        db_manager: An initialized DatabaseManager instance
+    Uses the new AI-related schema (clients, Model_Versions, Inference_Requests).
     """
+    # === CLIENTS TABLE ===
     db_manager.create_table(
         "clients",
-        "(client_id INT PRIMARY KEY, client_ip VARCHAR(255), client_port INT, last_seen DATETIME, ddos_status BOOLEAN, total_sent_media INT)"
+        """(
+            id UUID PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            display_name TEXT,
+            email TEXT UNIQUE,
+            password_hash TEXT NOT NULL,
+            api_key_hash TEXT,
+            role SMALLINT DEFAULT 1,
+            is_active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_login_at TIMESTAMP NULL,
+            mfa_enabled BOOLEAN DEFAULT FALSE
+        )"""
     )
-    
+
+    # === MODEL_VERSIONS TABLE ===
     db_manager.create_table(
-        "decrypted_media",
-        "(user_id VARCHAR(255), media_type_id INT, path_to_decrypted_media VARCHAR(255))"
+        "Model_Versions",
+        """(
+            id UUID PRIMARY KEY,
+            model_name TEXT NOT NULL,
+            version_tag TEXT NOT NULL,
+            storage_tag TEXT,
+            framework TEXT,
+            max_tokens INTEGER,
+            quantized BOOLEAN DEFAULT FALSE,
+            parameters_count BIGINT,
+            owner_user_id UUID,
+            is_deployed BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (owner_user_id) REFERENCES clients(id)
+        )"""
     )
-    
+
+    # === INFERENCE_REQUESTS TABLE ===
     db_manager.create_table(
-        "media_menu",
-        "(id_media INT PRIMARY KEY, image_path VARCHAR(255), audio_path VARCHAR(255), video_path VARCHAR(255))"
+        "Inference_Requests",
+        """(
+            id UUID PRIMARY KEY,
+            request_uuid TEXT UNIQUE NOT NULL,
+            user_id UUID,
+            model_version_id UUID,
+            input_hash TEXT,
+            input_size INTEGER,
+            prompt_tokens INTEGER,
+            response_tokens INTEGER,
+            latency_ms INTEGER,
+            status SMALLINT,
+            cost_estimate_cents DECIMAL(10,2) DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP NULL,
+            FOREIGN KEY (user_id) REFERENCES clients(id),
+            FOREIGN KEY (model_version_id) REFERENCES Model_Versions(id)
+        )"""
     )
+
+    print("All tables created successfully (clients, Model_Versions, Inference_Requests).")
+
 
 def populate_media_menu(db_manager):
     """
-    Populate the media_menu table with predefined data if it's empty.
-    
-    Args:
-        db_manager: An initialized DatabaseManager instance
+    (Unused in new schema)
+    Keeping for compatibility — does nothing.
     """
-    predefined_media = [
-        (1, r"C:\Users\Mamriot_User\Desktop\secret_service_project\JPG\Ransom.jpg", None, None),
-        (2, r"C:\Users\Mamriot_User\Desktop\secret_service_project\JPG\cover1_image.jpg", None, None),
-        (3, None, None, r"C:\Users\Mamriot_User\Desktop\secret_service_project\MP4\video.mp4")
-    ]
-
-    existing_rows = db_manager.get_all_rows("media_menu")
-    if not existing_rows:
-        for media in predefined_media:
-            db_manager.insert_row(
-                "media_menu",
-                "(id_media, image_path, audio_path, video_path)",
-                "(%s, %s, %s, %s)",
-                media
-            )
+    print("populate_media_menu() skipped: media_menu table not part of new schema.")
