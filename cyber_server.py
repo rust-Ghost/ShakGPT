@@ -31,10 +31,10 @@ def init_db():
     DB.reconnect(DB_CONFIG["database"])
     create_all_tables(DB)
 
-# Load code-generation model
+# Load a more powerful code-generation model
 print("Loading code generation AI model...")
-tokenizer = AutoTokenizer.from_pretrained("codeparrot/codeparrot")
-model = AutoModelForCausalLM.from_pretrained("codeparrot/codeparrot")
+tokenizer = AutoTokenizer.from_pretrained("Salesforce/codegen-350M-mono")
+model = AutoModelForCausalLM.from_pretrained("Salesforce/codegen-350M-mono")
 model.eval()
 print("AI model loaded!")
 
@@ -57,16 +57,13 @@ def send_json(conn, obj):
     header = struct.pack(">I", len(data))
     conn.sendall(header + data)
 
-# Function to generate Python code
+# Generate Python code with validation
 def generate_code(prompt, max_length=200):
-    inputs = tokenizer(prompt, return_tensors="pt")
-    # Add attention_mask and pad_token_id to avoid warnings
-    input_ids = inputs["input_ids"]
-    attention_mask = inputs.get("attention_mask", torch.ones_like(input_ids))
-    
+    prompt_text = f"# Python code requested:\n# {prompt}\n"
+    inputs = tokenizer(prompt_text, return_tensors="pt")
     outputs = model.generate(
-        input_ids=input_ids,
-        attention_mask=attention_mask,
+        input_ids=inputs["input_ids"],
+        attention_mask=inputs.get("attention_mask"),
         max_length=max_length,
         do_sample=True,
         temperature=0.7,
@@ -74,7 +71,13 @@ def generate_code(prompt, max_length=200):
         no_repeat_ngram_size=2,
         pad_token_id=tokenizer.eos_token_id
     )
-    return tokenizer.decode(outputs[0], skip_special_tokens=True)
+    code = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    # Try to validate syntax
+    try:
+        compile(code, "<string>", "exec")
+    except SyntaxError as e:
+        code += f"\n# SyntaxError detected: {e}"
+    return code
 
 # Handle client connection
 def handle_client(conn, addr):
