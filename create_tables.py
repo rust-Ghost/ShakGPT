@@ -1,20 +1,20 @@
-from db_manager import DatabaseManager
+import uuid
 
 def create_all_tables(db_manager):
     """
-    Create all necessary tables for the application using DatabaseManager instance.
-    Uses the new AI-related schema (clients, Model_Versions, Inference_Requests).
+    Create all necessary tables for the private AI application.
     """
+
     # === CLIENTS TABLE ===
     db_manager.create_table(
         "clients",
         """(
-            id UUID PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            display_name TEXT,
-            email TEXT UNIQUE,
-            password_hash TEXT NOT NULL,
-            api_key_hash TEXT,
+            id CHAR(36) PRIMARY KEY,
+            username VARCHAR(255) UNIQUE NOT NULL,
+            display_name VARCHAR(255),
+            email VARCHAR(255) UNIQUE,
+            password_hash VARCHAR(255) NOT NULL,
+            api_key_hash VARCHAR(255),
             role SMALLINT DEFAULT 1,
             is_active BOOLEAN DEFAULT TRUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -27,15 +27,15 @@ def create_all_tables(db_manager):
     db_manager.create_table(
         "Model_Versions",
         """(
-            id UUID PRIMARY KEY,
-            model_name TEXT NOT NULL,
-            version_tag TEXT NOT NULL,
-            storage_tag TEXT,
-            framework TEXT,
-            max_tokens INTEGER,
+            id CHAR(36) PRIMARY KEY,
+            model_name VARCHAR(255) NOT NULL,
+            version_tag VARCHAR(50) NOT NULL,
+            storage_tag VARCHAR(255),
+            framework VARCHAR(50),
+            max_tokens INT,
             quantized BOOLEAN DEFAULT FALSE,
             parameters_count BIGINT,
-            owner_user_id UUID,
+            owner_user_id CHAR(36),
             is_deployed BOOLEAN DEFAULT FALSE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -47,15 +47,15 @@ def create_all_tables(db_manager):
     db_manager.create_table(
         "Inference_Requests",
         """(
-            id UUID PRIMARY KEY,
-            request_uuid TEXT UNIQUE NOT NULL,
-            user_id UUID,
-            model_version_id UUID,
-            input_hash TEXT,
-            input_size INTEGER,
-            prompt_tokens INTEGER,
-            response_tokens INTEGER,
-            latency_ms INTEGER,
+            id CHAR(36) PRIMARY KEY,
+            request_uuid VARCHAR(255) UNIQUE NOT NULL,
+            user_id CHAR(36),
+            model_version_id CHAR(36),
+            input_hash VARCHAR(255),
+            input_size INT,
+            prompt_tokens INT,
+            response_tokens INT,
+            latency_ms INT,
             status SMALLINT,
             cost_estimate_cents DECIMAL(10,2) DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -65,12 +65,4 @@ def create_all_tables(db_manager):
         )"""
     )
 
-    print("All tables created successfully (clients, Model_Versions, Inference_Requests).")
-
-
-def populate_media_menu(db_manager):
-    """
-    (Unused in new schema)
-    Keeping for compatibility — does nothing.
-    """
-    print("populate_media_menu() skipped: media_menu table not part of new schema.")
+    print("All tables created or already exist.")
