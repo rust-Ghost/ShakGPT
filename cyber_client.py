@@ -1,101 +1,128 @@
-# cyber_client.py
 import socket
 import struct
 import json
-import hashlib
-from constants import IP, PORT
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
 
-HOST = IP
-PORT = PORT
+HOST = "127.0.0.1"
+PORT = 9921
 
 def send_json(sock, obj):
     data = json.dumps(obj).encode("utf-8")
-    header = struct.pack(">I", len(data))
-    sock.sendall(header + data)
+    sock.sendall(struct.pack(">I", len(data)) + data)
 
 def recv_json(sock):
-    header = b""
-    while len(header) < 4:
-        part = sock.recv(4 - len(header))
+    header = sock.recv(4)
+    if len(header) < 4:
+        return None
+    length = struct.unpack(">I", header)[0]
+    data = b""
+    while len(data) < length:
+        part = sock.recv(length - len(data))
         if not part:
             return None
-        header += part
-    msg_len = struct.unpack(">I", header)[0]
-    data = b""
-    while len(data) < msg_len:
-        part = sock.recv(min(4096, msg_len - len(data)))
-        if not part:
-            raise ConnectionError("Connection closed while reading message")
         data += part
     return json.loads(data.decode("utf-8"))
 
-def print_response(resp):
-    if resp["status"] != "ok":
-        print(f"Error: {resp.get('message')}")
-        return
-    if "message" in resp:
-        print(f"\nMessage: {resp['message']}\n")
-    if "clients" in resp:
-        clients = resp["clients"]
-        if not clients:
-            print("\nNo clients found.\n")
-            return
-        print("\n=== Clients ===")
-        print(f"{'ID':36} | {'Username':15} | {'Email'}")
-        print("-"*70)
-        for c in clients:
-            print(f"{c[0]:36} | {c[1]:15} | {c[2]}")
-        print()
-    if "request" in resp and "response" in resp:
-        print("\n=== AI Response ===")
-        print(f"Request: {resp['request']}")
-        print(f"Answer : {resp['response']}\n")
+class CyberClientApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Cyber Client")
+        self.sock = None
+        self.session_token = None
+        self.login_window()
 
-def main():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.connect((HOST, PORT))
-        print(f"Connected to server {HOST}:{PORT}")
+    def connect(self):
+        if self.sock:
+            self.sock.close()
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.connect((HOST, PORT))
 
-        while True:
-            print("\n--- MENU ---")
-            print("1. Add new client")
-            print("2. List all clients")
-            print("3. Ping")
-            print("4. Exit")
-            print("5. Ask AI")
-            choice = input("Choose an option: ").strip()
+    def login_window(self):
+        self.frame = ttk.Frame(self.root, padding=10)
+        self.frame.pack(fill="both", expand=True)
 
-            if choice == "1":
-                username = input("Enter username: ")
-                email = input("Enter email: ")
-                password = input("Enter password: ")
-                password_hash = hashlib.sha256(password.encode()).hexdigest()
-                send_json(s, {"command": "add_client", "username": username, "email": email, "password_hash": password_hash})
-                resp = recv_json(s)
-                print_response(resp)
+        ttk.Label(self.frame, text="Username:").grid(row=0, column=0)
+        self.username_entry = ttk.Entry(self.frame)
+        self.username_entry.grid(row=0, column=1)
 
-            elif choice == "2":
-                send_json(s, {"command": "list_clients"})
-                resp = recv_json(s)
-                print_response(resp)
+        ttk.Label(self.frame, text="Password:").grid(row=1, column=0)
+        self.password_entry = ttk.Entry(self.frame, show="*")
+        self.password_entry.grid(row=1, column=1)
 
-            elif choice == "3":
-                send_json(s, {"command": "ping"})
-                resp = recv_json(s)
-                print_response(resp)
+        ttk.Button(self.frame, text="Login", command=self.login).grid(row=2, column=0)
+        ttk.Button(self.frame, text="Register", command=self.register).grid(row=2, column=1)
 
-            elif choice == "4":
-                print("Disconnecting")
-                break
-
-            elif choice == "5":
-                message = input("Enter your question for AI: ")
-                send_json(s, {"command": "ask_ai", "message": message})
-                resp = recv_json(s)
-                print_response(resp)
-
+    def login(self):
+        try:
+            self.connect()
+            username = self.username_entry.get().strip()
+            password = self.password_entry.get().strip()
+            if not username or not password:
+                messagebox.showerror("Error", "Username and password required")
+                return
+            send_json(self.sock, {"command":"login","username":username,"password":password})
+            resp = recv_json(self.sock)
+            if resp["status"]=="ok":
+                self.session_token = resp["session_token"]
+                messagebox.showinfo("Login","Logged in successfully!")
+                self.show_main_window()
             else:
-                print("Invalid choice")
+                messagebox.showerror("Login Failed", resp.get("message"))
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
 
-if __name__ == "__main__":
-    main()
+    def register(self):
+        try:
+            self.connect()
+            username = self.username_entry.get().strip()
+            password = self.password_entry.get().strip()
+            if not username or not password:
+                messagebox.showerror("Error", "Username and password required")
+                return
+            send_json(self.sock, {
+                "command":"register",
+                "username":username,
+                "password":password,
+                "email":f"{username}@example.com"
+            })
+            resp = recv_json(self.sock)
+            if resp["status"]=="ok":
+                messagebox.showinfo("Register","Registered successfully! You can now login.")
+            else:
+                messagebox.showerror("Register Failed", resp.get("message"))
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    def show_main_window(self):
+        self.frame.destroy()
+        self.frame = ttk.Frame(self.root, padding=10)
+        self.frame.pack(fill="both", expand=True)
+
+        ttk.Label(self.frame, text=f"Session: {self.session_token[:8]}...").pack(anchor="w")
+        ttk.Label(self.frame, text="Ask AI a question:").pack(anchor="w", pady=(10,0))
+        self.ai_input = scrolledtext.ScrolledText(self.frame, height=4)
+        self.ai_input.pack(fill="x", pady=5)
+        ttk.Button(self.frame, text="Send to AI", command=self.ask_ai).pack(pady=5)
+        ttk.Label(self.frame, text="AI Response:").pack(anchor="w", pady=(10,0))
+        self.ai_output = scrolledtext.ScrolledText(self.frame, height=12)
+        self.ai_output.pack(fill="both", expand=True)
+
+    def ask_ai(self):
+        try:
+            question = self.ai_input.get(1.0,"end").strip()
+            if not question: return
+            send_json(self.sock, {"command":"ask_ai","message":question,"session_token":self.session_token})
+            resp = recv_json(self.sock)
+            self.ai_output.delete(1.0,"end")
+            if resp["status"]=="ok":
+                self.ai_output.insert("end", f"Request: {resp['request']}\n\nResponse:\n{resp['response']}")
+            else:
+                self.ai_output.insert("end", f"Error: {resp.get('message')}")
+        except Exception as e:
+            self.ai_output.insert("end", f"Error: {e}")
+
+if __name__=="__main__":
+    root = tk.Tk()
+    app = CyberClientApp(root)
+    root.mainloop()

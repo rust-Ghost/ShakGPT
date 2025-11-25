@@ -75,22 +75,71 @@ class DatabaseManager:
         self.conn.commit()
         print(f"Table {table_name} dropped if it existed.")
 
-    def insert_row(self, table_name, column_names, values):
+    def get_rows_from_table_with_value(self, table, column, value):
+        """
+        Returns all rows from `table` where `column` equals `value`.
+        """
+        cursor = self.conn.cursor()
+        query = f"SELECT * FROM {table} WHERE {column} = %s"
+        cursor.execute(query, (value,))
+        return cursor.fetchall()
+    
+    def insert_row(self, table_name, column_names, placeholders_or_values, values=None):
         """
         Insert a row into a table.
-        
+        Supports two call styles:
+        1. insert_row(table_name, ("col1","col2"), (val1, val2))
+        2. insert_row(table_name, "(col1, col2)", "(%s, %s)", (val1, val2))
+
         Args:
             table_name: Name of the table
-            column_names: Tuple of column names, e.g., ("id", "name")
-            values: Tuple of values to insert, e.g., (1, "Alice")
+            column_names: tuple/list of column names OR a string like "(col1, col2)"
+            placeholders_or_values: if `values` is None -> this is the tuple of values (style 1).
+                                    if `values` is not None -> this is the placeholders string e.g. "(%s, %s)" (style 2).
+            values: tuple of values when using style 2. (optional)
         """
         if not self.database:
             raise ValueError("No database selected.")
+
+        # Determine which call style is being used
+        if values is None:
+            # style 1: column_names can be tuple/list or string with parens,
+            # placeholders_or_values is the values tuple
+            vals = tuple(placeholders_or_values)
+            # columns handling
+            if isinstance(column_names, (list, tuple)):
+                cols = ", ".join(column_names)
+            elif isinstance(column_names, str):
+                cols = column_names.strip()
+                if cols.startswith("(") and cols.endswith(")"):
+                    cols = cols[1:-1].strip()
+            else:
+                raise TypeError("column_names must be a list/tuple or a parenthesized string.")
+            # build placeholders automatically from values length
+            placeholders_inner = ", ".join(["%s"] * len(vals))
+        else:
+            # style 2: placeholders_or_values is a placeholders string like "(%s, %s)"
+            vals = tuple(values)
+            placeholders = str(placeholders_or_values).strip()
+            # normalize placeholders: remove surrounding parentheses if present
+            if placeholders.startswith("(") and placeholders.endswith(")"):
+                placeholders_inner = placeholders[1:-1].strip()
+            else:
+                placeholders_inner = placeholders
+            # columns handling: column_names should be string or iterable
+            if isinstance(column_names, (list, tuple)):
+                cols = ", ".join(column_names)
+            elif isinstance(column_names, str):
+                cols = column_names.strip()
+                if cols.startswith("(") and cols.endswith(")"):
+                    cols = cols[1:-1].strip()
+            else:
+                raise TypeError("column_names must be a list/tuple or a parenthesized string.")
+
+        # Final SQL and execution
         cursor = self.conn.cursor()
-        placeholders = ", ".join(["%s"] * len(values))
-        columns = ", ".join(column_names)
-        query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-        cursor.execute(query, values)
+        query = f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders_inner})"
+        cursor.execute(query, vals)
         self.conn.commit()
         print(f"Row inserted into {table_name} successfully.")
 

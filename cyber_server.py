@@ -1,25 +1,16 @@
-# cyber_server.py
 import socket
 import threading
 import json
-import uuid
 import struct
-from transformers import AutoTokenizer, AutoModelForCausalLM
-import torch
+import uuid
+from datetime import datetime
+import bcrypt
 from db_manager import DatabaseManager
 from create_tables import create_all_tables
+from constants import DB_CONFIG, IP, PORT
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
-HOST = "127.0.0.1"
-PORT = 9921
-
-DB_CONFIG = {
-    "host": "localhost",
-    "user": "root",
-    "password": "Kroykan339&&",
-    "database": "private_ai_db"
-}
-
-# Initialize DB
+# ----------------- Database Init -----------------
 DB = DatabaseManager(
     host=DB_CONFIG["host"],
     user=DB_CONFIG["user"],
@@ -30,15 +21,19 @@ def init_db():
     DB.create_database(DB_CONFIG["database"])
     DB.reconnect(DB_CONFIG["database"])
     create_all_tables(DB)
+    print("Database ready!")
 
-# Load a more powerful code-generation model
-print("Loading code generation AI model...")
+# ----------------- Load AI -----------------
+print("Loading AI model...")
 tokenizer = AutoTokenizer.from_pretrained("Salesforce/codegen-350M-mono")
 model = AutoModelForCausalLM.from_pretrained("Salesforce/codegen-350M-mono")
 model.eval()
 print("AI model loaded!")
 
-# Helper functions for length-prefixed JSON
+# ----------------- Session Store -----------------
+SESSIONS = {}  # session_token -> user_id
+
+# ----------------- Helpers -----------------
 def recv_json(conn):
     header = conn.recv(4)
     if len(header) < 4:
@@ -48,7 +43,7 @@ def recv_json(conn):
     while len(data) < msg_len:
         part = conn.recv(msg_len - len(data))
         if not part:
-            raise ConnectionError("Connection closed while reading message")
+            return None
         data += part
     return json.loads(data.decode("utf-8"))
 
@@ -57,7 +52,9 @@ def send_json(conn, obj):
     header = struct.pack(">I", len(data))
     conn.sendall(header + data)
 
-# Generate Python code with validation
+def authenticate(session_token):
+    return SESSIONS.get(session_token)
+
 def generate_code(prompt, max_length=200):
     prompt_text = f"# Python code requested:\n# {prompt}\n"
     inputs = tokenizer(prompt_text, return_tensors="pt")
@@ -72,64 +69,83 @@ def generate_code(prompt, max_length=200):
         pad_token_id=tokenizer.eos_token_id
     )
     code = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    # Try to validate syntax
     try:
         compile(code, "<string>", "exec")
     except SyntaxError as e:
         code += f"\n# SyntaxError detected: {e}"
     return code
 
-# Handle client connection
+# ----------------- Client Handler -----------------
 def handle_client(conn, addr):
     print(f"New connection: {addr}")
     try:
         while True:
-            try:
-                message = recv_json(conn)
-            except ConnectionError:
+            message = recv_json(conn)
+            if not message:
                 break
-            except json.JSONDecodeError:
-                print(f"[{addr}] Invalid JSON received")
-                send_json(conn, {"status": "error", "message": "Invalid JSON"})
-                continue
 
-            response = {"status": "error", "message": "Unknown command"}
             command = message.get("command")
+            response = {"status": "error", "message": "Unknown command"}
 
-            if command == "ping":
-                response = {"status": "ok", "message": "pong"}
+            # ---------- REGISTER ----------
+            if command == "register":
+                username = message.get("username", "").strip()
+                password = message.get("password", "").strip()
+                email = message.get("email", f"{username}@example.com").strip()
 
-            elif command == "list_clients":
-                clients = DB.get_all_rows("clients")
-                response = {"status": "ok", "clients": clients}
+                if not username or not password:
+                    response = {"status": "error", "message": "Username and password required"}
+                else:
+                    existing = DB.get_rows_from_table_with_value("clients", "username", username)
+                    if existing:
+                        response = {"status": "error", "message": "Username already exists"}
+                    else:
+                        password_hash = bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+                        client_id = str(uuid.uuid4())
+                        DB.insert_row(
+                            "clients",
+                            "(id, username, email, password_hash)",
+                            "(%s, %s, %s, %s)",
+                            (client_id, username, email, password_hash)
+                        )
+                        response = {"status": "ok", "message": "Registered successfully", "id": client_id}
 
-            elif command == "add_client":
-                username = message.get("username")
-                email = message.get("email", "")
-                password_hash = message.get("password_hash", "")
-                client_id = str(uuid.uuid4())
+            # ---------- LOGIN ----------
+            elif command == "login":
+                username = message.get("username", "").strip()
+                password = message.get("password", "").strip()
+                if not username or not password:
+                    response = {"status": "error", "message": "Username and password required"}
+                else:
+                    rows = DB.get_rows_from_table_with_value("clients", "username", username)
+                    if not rows:
+                        response = {"status": "error", "message": "User not found"}
+                    else:
+                        user = rows[0]
+                        stored_hash = user[4]
+                        if bcrypt.checkpw(password.encode(), stored_hash.encode()):
+                            user_id = user[0]
+                            session_token = str(uuid.uuid4())
+                            SESSIONS[session_token] = user_id
+                            DB.conn.cursor().execute(
+                                "UPDATE clients SET last_login_at=%s WHERE id=%s",
+                                (datetime.now(), user_id)
+                            )
+                            DB.conn.commit()
+                            response = {"status": "ok", "message": "Login successful", "session_token": session_token}
+                        else:
+                            response = {"status": "error", "message": "Invalid password"}
 
-                DB.insert_row(
-                    "clients",
-                    "(id, username, email, password_hash)",
-                    "(%s, %s, %s, %s)",
-                    (client_id, username, email, password_hash)
-                )
-                response = {"status": "ok", "message": "Client added.", "id": client_id}
-
+            # ---------- ASK AI ----------
             elif command == "ask_ai":
-                user_message = message.get("message", "")
-                print(f"[{addr}] AI Code Request: {user_message}")
-
-                # Generate Python code
-                ai_response = generate_code(user_message)
-                print(f"[{addr}] AI Code Response:\n{ai_response}")
-
-                response = {
-                    "status": "ok",
-                    "request": user_message,
-                    "response": ai_response
-                }
+                session_token = message.get("session_token")
+                user_id = authenticate(session_token)
+                if not user_id:
+                    response = {"status": "error", "message": "You must login first"}
+                else:
+                    user_message = message.get("message", "")
+                    ai_response = generate_code(user_message)
+                    response = {"status": "ok", "request": user_message, "response": ai_response}
 
             send_json(conn, response)
 
@@ -139,12 +155,12 @@ def handle_client(conn, addr):
         conn.close()
         print(f"Connection closed: {addr}")
 
-# Start server
+# ----------------- Server -----------------
 def start_server():
     init_db()
-    print(f"Server listening on {HOST}:{PORT}")
+    print(f"Server listening on {IP}:{PORT}")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind((HOST, PORT))
+        s.bind((IP, PORT))
         s.listen()
         while True:
             conn, addr = s.accept()

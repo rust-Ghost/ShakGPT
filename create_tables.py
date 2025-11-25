@@ -3,7 +3,15 @@ import uuid
 def create_all_tables(db_manager):
     """
     Create all necessary tables for the private AI application.
+    Drops existing tables first to avoid foreign key issues.
     """
+
+    # Drop tables in reverse order to avoid FK conflicts
+    for table in ["Inference_Requests", "Model_Versions", "clients"]:
+        try:
+            db_manager.delete_table(table)
+        except Exception as e:
+            print(f"Warning: Could not drop table {table}: {e}")
 
     # === CLIENTS TABLE ===
     db_manager.create_table(
@@ -65,4 +73,4 @@ def create_all_tables(db_manager):
         )"""
     )
 
-    print("All tables created or already exist.")
+    print("All tables created successfully.")
